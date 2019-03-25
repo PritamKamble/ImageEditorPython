@@ -1,0 +1,500 @@
+"""
+    Date: 07 DEC 2018
+    Author: Pritam Kamble
+"""
+from UI.dialogs import UIdialog
+import grayscale, flip, _filter, _rotation, _enhance
+from tkinter import *
+from tkinter import ttk
+from PIL import Image, ImageTk
+import threading
+import copy
+import datetime
+# from multiprocessing.pool import ThreadPool
+from random import choice
+
+# constants
+FILTERS = (
+    "BLUR", "CONTOUR", "DETAIL", "EDGE_ENHANCE", "EDGE_ENHANCE_MORE", "EMBOSS", "FIND_EDGES", "SHARPEN", "SMOOTH",
+    "SMOOTH_MORE")
+DEGREES = ("ROTATE_30", "ROTATE_45", "ROTATE_90", "ROTATE_135", "ROTATE_180", "ROTATE_225", "ROTATE_270")
+
+
+class KedClient:
+
+    def __init__(self):
+        
+        self.root = Tk()
+
+        # stack to store every edit so users can undo
+        self.stack = []
+
+        # image enhancement variables
+        self.image_enhance_min_value = 0.0
+        self.image_enhance_max_value = 2.0
+        self.image_brightness = 1.0
+        self.image_color_balance = 1.0
+        self.image_sharpness = 1.0
+        self.image_contrast = 1.0
+
+        self.default_image = None
+        self.default_image_copy = None
+
+        self.init_default_image()
+        print(self.stack)
+
+        # widgets textVariables
+        self.filter_var = StringVar()
+        self.rotation_var = StringVar()
+
+        # initializing tkinter widgets
+        self.init_widgets(self.default_image_copy)
+        # adding widgets to grid
+        self.add_widgets_to_frame()
+
+        # setting root window title
+        self.root.title("K Editor")
+        # fixing root window size
+        self.root.resizable(width=False, height=False)
+
+        self.root.protocol("WM_DELETE_WINDOW", self.on_closing)
+        self.root.mainloop()
+
+    def init_default_image(self):
+        self.setDefaultImage("./test_images/touka.png")
+        self.default_image_copy = self.make_image_copy(self.default_image, None)
+        # resizing image to fit picture panel
+        self.default_image_copy = self.resize_image(self.default_image_copy, 800, 500)
+
+    def setDefaultImage(self, path):
+        """method to set default image in picture panel """
+        self.default_image = Image.open(path)
+        self.stack.append(self.default_image)
+
+    def make_image_copy(self, image, image_filename):
+        """method to make image copy"""
+        if image == None:
+            image_copy = Image.open(image_filename).copy()
+        else:
+            image_copy = image.copy()
+
+        return image_copy
+
+    def resize_image(self, image, *args):
+        """method to resize image
+           param - args : (width,height) 
+        """
+        # print(args)
+        resized_image = image.resize(args, Image.ANTIALIAS)
+        return resized_image
+
+    def init_widgets(self, image):
+        """function to initialize Ked widgets"""
+        self.content = ttk.Frame(self.root)
+
+        # widgets for picture preview
+        self.picture = ImageTk.PhotoImage(image)
+        self.picture_container = ttk.Frame(self.content, width=850, height=500, borderwidth=2, relief="sunken")
+        self.picture_panel = ttk.Label(self.picture_container, image=self.picture)
+
+        # menu widgets
+        self.menu_frame = ttk.Frame(self.content)
+        self.menu_frame_right = ttk.Frame(self.content)
+        self.grayscale_button = ttk.Button(self.menu_frame, text="Grayscale",
+                                           command=lambda: self.grayscale_button_handler())
+        self.flip_button = ttk.Button(self.menu_frame, text="Flip", command=lambda: self.flip_button_handler())
+
+        # image enhancing buttons
+        self.brightness_label = ttk.Label(self.menu_frame_right, text="Brightness")
+        self.brightness_button_inc = ttk.Button(self.menu_frame_right, text="+",
+                                                command=lambda: self.brightness_button_inc_handler(), width=2)
+        self.brightness_button_dec = ttk.Button(self.menu_frame_right, text="-",
+                                                command=lambda: self.brightness_button_dec_handler(), width=2)
+
+        self.color_balance_label = ttk.Label(self.menu_frame_right, text="Colorbalance")
+        self.color_balance_button_inc = ttk.Button(self.menu_frame_right, text="+",
+                                                   command=lambda: self.color_balance_button_inc_handler(), width=2)
+        self.color_balance_button_dec = ttk.Button(self.menu_frame_right, text="-",
+                                                   command=lambda: self.color_balance_button_dec_handler(), width=2)
+
+        self.sharpness_label = ttk.Label(self.menu_frame_right, text="Sharpness")
+        self.sharpness_button_inc = ttk.Button(self.menu_frame_right, text="+",
+                                               command=lambda: self.sharpness_button_inc_handler(), width=2)
+        self.sharpness_button_dec = ttk.Button(self.menu_frame_right, text="-",
+                                               command=lambda: self.sharpness_button_dec_handler(), width=2)
+
+        self.contrast_label = ttk.Label(self.menu_frame_right, text="Contrast")
+        self.contrast_button_inc = ttk.Button(self.menu_frame_right, text="+",
+                                              command=lambda: self.contrast_button_inc_handler(), width=2)
+        self.contrast_button_dec = ttk.Button(self.menu_frame_right, text="-",
+                                              command=lambda: self.contrast_button_dec_handler(), width=2)
+
+        # comboboxes
+        self.filter_label = ttk.Label(self.menu_frame, text="Filters: ")
+        self.filter_combobox = ttk.Combobox(self.menu_frame, textvariable=self.filter_var, state='readonly', width=19)
+        self.filter_combobox.bind('<<ComboboxSelected>>', lambda e: self.filter_combobox_event_handler())
+        self.filter_combobox['values'] = FILTERS
+        self.rotation_label = ttk.Label(self.menu_frame, text="Rotate: ")
+        self.rotation_combobox = ttk.Combobox(self.menu_frame, textvariable=self.rotation_var, state='readonly',
+                                              width=19)
+        self.rotation_combobox.bind('<<ComboboxSelected>>', lambda e1: self.rotation_combobox_event_handler())
+        self.rotation_combobox['values'] = DEGREES
+
+        self.image_info_button = ttk.Button(self.menu_frame, text="Image Info",
+                                            command=lambda: self.image_info_button_handler())
+        self.undo_button = ttk.Button(self.menu_frame, text="Undo", command=lambda: self.undo_button_handler())
+        self.open_file_button = ttk.Button(self.menu_frame_right, text="Open",
+                                           command=lambda: self.file_dialog_handler())
+        self.save_file_button = ttk.Button(self.menu_frame_right, text="Save", command=lambda: self.save_file_handler())
+        # message labels
+        self.message_label = ttk.Label(self.picture_container, text="Converting...")
+
+    def add_widgets_to_frame(self):
+        """method to add widgets in grid format"""
+        self.content.grid(column=0, row=0)
+        self.picture_container.grid(column=0, row=0, padx=5, pady=5)
+        self.picture_panel.grid(column=0, row=0, padx=2, pady=2, sticky="nsew")
+        self.menu_frame.grid(column=0, row=1, padx=0, pady=5, sticky="w")
+        self.menu_frame_right.grid(column=1, row=0, padx=0, pady=5, sticky="n")
+        self.grayscale_button.grid(column=0, row=0, padx=5, pady=5)
+        self.flip_button.grid(column=1, row=0, padx=5, pady=5)
+        self.filter_label.grid(column=2, row=0, pady=5)
+        self.filter_combobox.grid(column=3, row=0, padx=5, pady=5, columnspan=1)
+        self.rotation_label.grid(column=4, row=0, pady=5)
+        self.rotation_combobox.grid(column=5, row=0, padx=5, pady=5)
+        self.image_info_button.grid(column=6, row=0, padx=5, pady=5)
+        self.undo_button.grid(column=7, row=0, padx=5, pady=5)
+
+        self.brightness_label.grid(row=0, column=1, padx=5, pady=5, sticky="w")
+        self.brightness_button_inc.grid(row=0, column=2, padx=5, pady=5, sticky="w")
+        self.brightness_button_dec.grid(row=0, column=3, padx=5, pady=5, sticky="w")
+
+        self.color_balance_label.grid(row=1, column=1, padx=5, pady=5, sticky="w")
+        self.color_balance_button_inc.grid(row=1, column=2, padx=5, pady=5, sticky="w")
+        self.color_balance_button_dec.grid(row=1, column=3, padx=5, pady=5, sticky="w")
+
+        self.sharpness_label.grid(row=2, column=1, padx=5, pady=5, sticky="w")
+        self.sharpness_button_inc.grid(row=2, column=2, padx=5, pady=5, sticky="w")
+        self.sharpness_button_dec.grid(row=2, column=3, padx=5, pady=5, sticky="w")
+
+        self.contrast_label.grid(row=3, column=1, padx=5, pady=5, sticky="w")
+        self.contrast_button_inc.grid(row=3, column=2, padx=5, pady=5, sticky="w")
+        self.contrast_button_dec.grid(row=3, column=3, padx=5, pady=5, sticky="w")
+
+        self.open_file_button.grid(row=4, column=1, padx=5, pady=20, columnspan=3)
+        self.save_file_button.grid(row=5, column=1, padx=5, pady=20, columnspan=3)
+        self.message_label.grid(row=0, column=0)
+        self.message_label.grid_forget()
+
+    def grayscale_button_handler(self):
+        def callback():
+            self.message_label.grid()
+            image = self.stack[len(self.stack) - 1]
+            image_copy = self.make_image_copy(image, None)
+            image_copy = grayscale.convert_to_grayscale(image_copy)
+            # print(image_copy)
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            self.message_label.grid_forget()
+            print("After converting to grayscale")
+            print(str(self.stack))
+
+        thread = threading.Thread(target=callback)
+        thread.start()
+
+    def flip_button_handler(self):
+        image = self.stack[len(self.stack) - 1]
+        image_copy = self.make_image_copy(image, None)
+        image_copy = flip.flip_image(image_copy)
+        self.stack.append(image_copy)
+        image_copy = self.resize_image(image_copy, 800, 500)
+        self.update_picture_panel(image_copy)
+        print("After Flipping")
+        print(str(self.stack))
+
+    def filter_combobox_event_handler(self):
+        def callback():
+            self.message_label.grid()
+            filter_name = str(self.filter_combobox.get())
+            image = self.stack[len(self.stack) - 1]
+            image_copy = self.make_image_copy(image, None)
+            image_copy = _filter.apply_filter(image_copy, filter_name)
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            print("After applying filter")
+            print(str(self.stack))
+            self.message_label.grid_forget()
+
+        thread = threading.Thread(target=callback)
+        thread.start()
+
+    def rotation_combobox_event_handler(self):
+        degrees = str(self.rotation_combobox.get())
+        image = self.stack[len(self.stack) - 1]
+        image_copy = self.make_image_copy(image, None)
+        image_copy = _rotation.apply_rotation(image_copy, degrees)
+        self.stack.append(image_copy)
+        image_copy = self.resize_image(image_copy, 800, 500)
+        self.update_picture_panel(image_copy)
+        print("After Rotating")
+        print(str(self.stack))
+
+    def image_info_button_handler(self):
+        UIdialog.show_image_info_dialog(self.stack[len(self.stack) - 1])
+
+    def brightness_button_inc_handler(self):
+        if self.image_brightness < self.image_enhance_max_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and inc it by 0.1
+            self.image_brightness = self.image_brightness + 0.1
+            self.image_brightness = round(self.image_brightness, 1)
+            # make image copy
+            print("Brightness: {}".format(self.image_brightness))
+            image_copy = self.make_image_copy(image, None)
+            # enhance image brightness
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)
+            # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After Increasing brightness")
+            # print(str(self.stack))
+        else:
+            print("Image brightness is maximum")
+
+    def brightness_button_dec_handler(self):
+        if self.image_brightness > self.image_enhance_min_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and dec it by 0.1
+            self.image_brightness = self.image_brightness - 0.1
+            self.image_brightness = round(self.image_brightness, 1)
+            # make image copy
+            print("Brightness: {}".format(self.image_brightness))
+            image_copy = self.make_image_copy(image, None)
+            # enhance image brightness
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)
+            # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After decreasing brightness")
+            # print(str(self.stack))
+        else:
+            # self.can_be_dec = False
+            print("Image brightness is minimum")
+
+    def color_balance_button_inc_handler(self):
+        if self.image_color_balance < self.image_enhance_max_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and inc it by 0.1
+            self.image_color_balance = self.image_color_balance + 0.1
+            self.image_color_balance = round(self.image_color_balance, 1)
+            # make image copy
+            print("Color_balance: {}".format(self.image_color_balance))
+            image_copy = self.make_image_copy(image, None)
+            # enhance image brightness
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)  # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After Increasing brightness")
+            # print(str(self.stack))
+        else:
+            print("Image color_balance is maximum")
+
+    def color_balance_button_dec_handler(self):
+        if self.image_color_balance > self.image_enhance_min_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and dec it by 0.1
+            self.image_color_balance = self.image_color_balance - 0.1
+            self.image_color_balance = round(self.image_color_balance, 1)
+            # make image copy
+            print("Color_balance: {}".format(self.image_color_balance))
+            image_copy = self.make_image_copy(image, None)
+            # enhance color balance
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)
+            # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After decreasing brightness")
+            # print(str(self.stack))
+        else:
+            # self.can_be_dec = False
+            print("Image color_balance is minimum")
+
+    def sharpness_button_inc_handler(self):
+        if self.image_sharpness < self.image_enhance_max_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and inc it by 0.1
+            self.image_sharpness = self.image_sharpness + 0.1
+            self.image_sharpness = round(self.image_sharpness, 1)
+            # make image copy
+            print("Sharpness: {}".format(self.image_sharpness))
+            image_copy = self.make_image_copy(image, None)
+            # enhance image sharpness
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)
+            # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After Increasing brightness")
+            # print(str(self.stack))
+        else:
+            print("Image sharpness is maximum")
+
+    def sharpness_button_dec_handler(self):
+        if self.image_sharpness > self.image_enhance_min_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and dec it by 0.1
+            self.image_sharpness = self.image_sharpness - 0.1
+            self.image_sharpness = round(self.image_sharpness, 1)
+            # make image copy
+            print("Sharpness: {}".format(self.image_sharpness))
+            image_copy = self.make_image_copy(image, None)
+            # enhance image brightness
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)
+            # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After decreasing brightness")
+            # print(str(self.stack))
+        else:
+            # self.can_be_dec = False
+            print("Image sharpness is minimum")
+
+    def contrast_button_inc_handler(self):
+        if self.image_contrast < self.image_enhance_max_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and inc it by 0.1
+            self.image_contrast = self.image_contrast + 0.1
+            self.image_contrast = round(self.image_contrast, 1)
+            # make image copy
+            print("Contrast: {}".format(self.image_contrast))
+            image_copy = self.make_image_copy(image, None)
+            # enhance image brightness
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)
+            # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After Increasing brightness")
+            # print(str(self.stack))
+        else:
+            print("Image contrast is maximum")
+
+    def contrast_button_dec_handler(self):
+        if self.image_contrast > self.image_enhance_min_value:
+            # get image from stack
+            image = self.stack[0]
+            # calculate current image brighness and dec it by 0.1
+            self.image_contrast = self.image_contrast - 0.1
+            self.image_contrast = round(self.image_contrast, 1)
+            # make image copy
+            print("Contrast: {}".format(self.image_contrast))
+            image_copy = self.make_image_copy(image, None)
+            # enhance image brightness
+            image_copy = _enhance.enhance_all(image_copy, self.image_brightness, self.image_color_balance,
+                                              self.image_sharpness, self.image_contrast)
+            # update stack
+            self.stack.append(image_copy)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # #for testing purposes
+            # print("After decreasing brightness")
+            # print(str(self.stack))
+        else:
+            # self.can_be_dec = False
+            print("Image contrast is minimum")
+
+    def undo_button_handler(self):
+        """method to undo changes done to image"""
+        if (len(self.stack) > 1):
+            self.stack.pop()
+            print(str(self.stack))
+            image = self.stack[len(self.stack) - 1]
+            image_copy = self.make_image_copy(image, None)
+            image_copy = self.resize_image(image_copy, 800, 500)
+            self.update_picture_panel(image_copy)
+            # print("After Undoing")
+            # print(str(self.stack))
+        else:
+            UIdialog.show_error_edit_image_first()
+        # print("undo clicked")
+
+    def file_dialog_handler(self):
+        """method to handle open image dialog"""
+        # clear stack
+        self.stack.clear()
+        # reset image enhance variables
+        self.image_brightness = 1.0
+        self.image_color_balance = 1.0
+        self.image_sharpness = 1.0
+        self.image_contrast = 1.0
+
+        # opening image
+        image_filename = UIdialog.open_file_dialog()
+        # making image copy
+        image_copy = self.make_image_copy(None, image_filename)
+        # appending newly opened image to stack
+        self.stack.append(image_copy)
+        # resizing image to fit picture panel
+        image_copy = self.resize_image(image_copy, 800, 500)
+        # updating picture panel
+        self.update_picture_panel(image_copy)
+
+    def save_file_handler(self):
+        """method for saving file"""
+
+        def callback():
+            image = self.stack[len(self.stack) - 1]
+            timestamp = str(int(datetime.datetime.now().timestamp()))
+            file = "./test_images/IMG" + timestamp
+            image.save(file + ".png")
+            print("File save successfully!")
+
+        thread = threading.Thread(target=callback)
+        thread.start()
+
+    def update_picture_panel(self, image):
+        """method to update picture in picture panel"""
+        self.picture = ImageTk.PhotoImage(image)
+        self.picture_panel.configure(image=self.picture)
+        self.picture_panel.photo = self.picture
+
+    def on_closing(self):
+        """method to clear stack when window is closed"""
+        self.stack.clear()
+        print(self.stack)
+        del self.stack[:]
+        self.root.destroy()
+
+
+if __name__ == "__main__":
+    # thread = threading.Thread(target=KedClient())
+    # thread.start()
+    client = KedClient()
