@@ -1,6 +1,7 @@
 from tkinter import filedialog
 from tkinter import messagebox
 from PIL import Image, ImageTk
+from tkinter import *
 
 def open_file_dialog():
     image_filename = filedialog.askopenfilename(initialdir = "../../",title = "Select Image to Edit",filetypes = (("jpeg files","*.jpg"),("png files","*.png")))
@@ -14,7 +15,8 @@ def show_image_info_dialog(image):
 
 def show_error_edit_image_first():
     error = "Please edit image first!!" 
-    messagebox.showinfo(message=error)
+    messagebox.showinfo(message=error,borderwidth=2, relief="groove")
+    
 
 # def crop_image(image_file_name):
 #     image = Image.open(image_file_name)
